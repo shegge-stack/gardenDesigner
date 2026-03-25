@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { GardenSpec, BedType, SunRequirement } from '../types/garden';
-import { plants } from '../data/plants';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { GardenSpec, GardenBed, BedType, SunRequirement } from '../types/garden';
+import { plants, getPlantById } from '../data/plants';
+import { checkCompanionCompatibility, getBedCompatibilityScore } from '../utils/companions';
+import { getCurrentWeekTasks, getSeasonPhase, isInWindow, LAST_FROST_DATE } from '../utils/calendar';
 
 interface DesignChatProps {
   spec: GardenSpec;
@@ -13,41 +15,187 @@ interface DesignChatProps {
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   text: string;
   actions?: ChatAction[];
 }
 
 interface ChatAction {
   label: string;
+  icon?: string;
+  variant?: 'primary' | 'secondary';
   onClick: () => void;
 }
 
-// Simple pattern-matching garden assistant
-function generateResponse(
-  input: string,
-  spec: GardenSpec,
-  actions: {
-    addBed: (bed: { name: string; type: BedType; widthFt: number; lengthFt: number; sunExposure: SunRequirement; x?: number; y?: number }) => string;
-    setPlant: (bedId: string, row: number, col: number, plantId: string | null) => void;
-  }
-): { text: string; actions?: ChatAction[] } {
-  const lower = input.toLowerCase();
+// ---- INTELLIGENCE ENGINE ----
 
-  // Greeting
-  if (/^(hi|hello|hey|howdy)/i.test(lower)) {
+function findPlantByName(query: string) {
+  const q = query.toLowerCase().trim();
+  return plants.find(p =>
+    p.common_name.toLowerCase() === q ||
+    p.id === q ||
+    p.id === q.replace(/\s+/g, '_') ||
+    p.common_name.toLowerCase().startsWith(q) ||
+    p.botanical_name.toLowerCase().includes(q)
+  );
+}
+
+function findPlantsMentioned(text: string) {
+  const lower = text.toLowerCase();
+  return plants.filter(p =>
+    lower.includes(p.common_name.toLowerCase()) ||
+    lower.includes(p.id.replace(/_/g, ' '))
+  );
+}
+
+function findBedByName(spec: GardenSpec, query: string) {
+  const q = query.toLowerCase().trim();
+  return spec.beds.find(b =>
+    b.name.toLowerCase().includes(q) ||
+    b.id.toLowerCase().includes(q)
+  );
+}
+
+function getNextBedPosition(spec: GardenSpec) {
+  const gardenW = spec.property?.lot_width_ft ?? 30;
+  const cols = Math.floor((gardenW - 2) / 6);
+  const idx = spec.beds.length;
+  const col = idx % Math.max(cols, 1);
+  const row = Math.floor(idx / Math.max(cols, 1));
+  return { x: 2 + col * 6, y: 2 + row * 5 };
+}
+
+function analyzeBed(bed: GardenBed) {
+  const filled = bed.squares.flat().filter(s => s.plantId);
+  const total = bed.widthFt * bed.lengthFt;
+  const empty = total - filled.length;
+  const plantCounts: Record<string, number> = {};
+  filled.forEach(s => { if (s.plantId) plantCounts[s.plantId] = (plantCounts[s.plantId] || 0) + 1; });
+  const compat = getBedCompatibilityScore(filled.map(s => s.plantId));
+  return { filled: filled.length, total, empty, plantCounts, compat };
+}
+
+function getSmartSuggestion(spec: GardenSpec, bed: GardenBed | null) {
+  const now = new Date();
+  const season = getSeasonPhase(now);
+  const existingPlantIds = new Set<string>();
+  spec.beds.forEach(b => b.squares.flat().forEach(s => { if (s.plantId) existingPlantIds.add(s.plantId); }));
+
+  // Suggest plants appropriate for the season that aren't already planted
+  const candidates = plants.filter(p => {
+    if (existingPlantIds.has(p.id)) return false;
+    // During indoor seeding, suggest things to start indoors
+    if (season.phase === 'Indoor Seeding' || season.phase === 'Planning') {
+      return p.seed_start_weeks_before_frost && p.seed_start_weeks_before_frost >= 4;
+    }
+    // During cool season, suggest hardy plants
+    if (season.phase === 'Cool Season Planting') {
+      return p.frost_tolerance === 'hardy' || p.frost_tolerance === 'semi_hardy';
+    }
+    // During warm season, suggest tender plants
+    if (season.phase === 'Warm Season Planting') {
+      return p.frost_tolerance === 'tender';
+    }
+    return true;
+  });
+
+  // If we have a specific bed, check companion compatibility
+  if (bed) {
+    const bedPlantIds = [...new Set(bed.squares.flat().filter(s => s.plantId).map(s => s.plantId!))];
+    if (bedPlantIds.length > 0) {
+      // Sort by most compatible
+      candidates.sort((a, b) => {
+        const aScore = bedPlantIds.reduce((sum, id) => {
+          const c = checkCompanionCompatibility(a.id, id);
+          return sum + (c === 'good' ? 2 : c === 'bad' ? -3 : 0);
+        }, 0);
+        const bScore = bedPlantIds.reduce((sum, id) => {
+          const c = checkCompanionCompatibility(b.id, id);
+          return sum + (c === 'good' ? 2 : c === 'bad' ? -3 : 0);
+        }, 0);
+        return bScore - aScore;
+      });
+    }
+  }
+
+  return candidates.slice(0, 6);
+}
+
+// ---- RESPONSE GENERATOR ----
+
+type Actions = {
+  addBed: DesignChatProps['onAddBed'];
+  setPlant: DesignChatProps['onSetPlant'];
+  removeBed: DesignChatProps['onRemoveBed'];
+};
+
+function respond(input: string, spec: GardenSpec, actions: Actions): { text: string; actions?: ChatAction[] } {
+  const lower = input.toLowerCase().trim();
+  const now = new Date();
+  const season = getSeasonPhase(now);
+  const daysToFrost = Math.ceil((LAST_FROST_DATE.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  // ---- RESIZE / CHANGE BED DIMENSIONS ----
+  if (/resize|change.*size|change.*dimension|make.*bigger|make.*smaller|(\d+)\s*[x×]\s*(\d+).*bed/i.test(lower)) {
+    const sizeMatch = lower.match(/(\d+)\s*[x×]\s*(\d+)/);
+    if (sizeMatch) {
+      const w = parseInt(sizeMatch[1]);
+      const l = parseInt(sizeMatch[2]);
+      return {
+        text: `To resize a bed to ${w}'×${l}', click the bed on the canvas. In the right panel under **Bed Properties**, change the width and length, then click **Apply Changes**.`,
+      };
+    }
     return {
-      text: `Welcome to your garden! You have ${spec.beds.length} beds set up. What would you like to do? I can help you add beds, suggest plants, plan layouts, or answer growing questions.`,
-      actions: [
-        { label: 'Add a raised bed', onClick: () => actions.addBed({ name: 'New Raised Bed', type: 'raised', widthFt: 4, lengthFt: 8, sunExposure: 'full_sun', x: 2, y: 2 }) },
-        { label: 'What should I plant now?', onClick: () => {} },
-        { label: 'Help me plan my layout', onClick: () => {} },
-      ]
+      text: 'Click any bed on the canvas to select it. The right panel shows editable **width** and **length** fields. Change them and click **Apply Changes**.',
     };
   }
 
-  // Add bed requests
-  if (/add.*(bed|planter|raised|trough|barrel|trellis|container)/i.test(lower)) {
+  // ---- REMOVE / DELETE BED ----
+  if (/remove|delete|clear.*bed/i.test(lower)) {
+    const bedRef = findBedByName(spec, lower.replace(/remove|delete|clear/gi, '').trim());
+    if (bedRef) {
+      return {
+        text: `Remove **${bedRef.name}** (${bedRef.widthFt}'×${bedRef.lengthFt}')?`,
+        actions: [
+          { label: `Remove ${bedRef.name}`, icon: '🗑', variant: 'secondary', onClick: () => actions.removeBed(bedRef.id) },
+        ],
+      };
+    }
+    if (spec.beds.length > 0) {
+      return {
+        text: 'Which bed do you want to remove?',
+        actions: spec.beds.slice(0, 6).map(b => ({
+          label: b.name,
+          variant: 'secondary' as const,
+          onClick: () => actions.removeBed(b.id),
+        })),
+      };
+    }
+    return { text: 'No beds to remove. Try adding one first!' };
+  }
+
+  // ---- CLEAR ALL PLANTS FROM BED ----
+  if (/clear.*plant|empty.*bed|start over/i.test(lower)) {
+    const bedRef = findBedByName(spec, lower.replace(/clear|empty|plant|from|start|over/gi, '').trim());
+    if (bedRef) {
+      return {
+        text: `Clear all plants from **${bedRef.name}**?`,
+        actions: [{
+          label: `Clear ${bedRef.name}`,
+          icon: '🧹',
+          onClick: () => {
+            bedRef.squares.forEach((row, ri) => row.forEach((_, ci) => {
+              actions.setPlant(bedRef.id, ri, ci, null);
+            }));
+          },
+        }],
+      };
+    }
+    return { text: 'Which bed should I clear? Click the bed on the canvas, or tell me its name.' };
+  }
+
+  // ---- ADD BED ----
+  if (/add|create|new|make/i.test(lower) && /bed|planter|raised|trough|barrel|trellis|container|hang/i.test(lower)) {
     const sizeMatch = lower.match(/(\d+)\s*[x×]\s*(\d+)/);
     const w = sizeMatch ? parseInt(sizeMatch[1]) : 4;
     const l = sizeMatch ? parseInt(sizeMatch[2]) : 8;
@@ -61,202 +209,315 @@ function generateResponse(
     else if (/in.?ground/i.test(lower)) type = 'in_ground';
 
     const nameMatch = lower.match(/(?:called|named)\s+"?([^"]+)"?/i);
-    const name = nameMatch ? nameMatch[1] : `New ${type.replace('_', ' ')} ${w}'×${l}'`;
+    const pos = getNextBedPosition(spec);
+    const typeLabel = type.replace(/_/g, ' ');
+
+    const doAdd = (bw: number, bl: number) => {
+      const name = nameMatch?.[1] || `${typeLabel} ${bw}'×${bl}'`;
+      actions.addBed({ name, type, widthFt: bw, lengthFt: bl, sunExposure: 'full_sun', x: pos.x, y: pos.y });
+    };
 
     return {
-      text: `I'll create a ${w}'×${l}' ${type.replace('_', ' ')} bed for you. Want me to go ahead?`,
+      text: `Creating a **${w}'×${l}' ${typeLabel}**. Pick a size:`,
+      actions: [
+        { label: `${w}'×${l}'`, icon: '✓', variant: 'primary', onClick: () => doAdd(w, l) },
+        ...(w !== 4 || l !== 8 ? [{ label: "4'×8'", onClick: () => doAdd(4, 8) }] : []),
+        ...(w !== 4 || l !== 4 ? [{ label: "4'×4'", onClick: () => doAdd(4, 4) }] : []),
+        ...(w !== 2 || l !== 6 ? [{ label: "2'×6'", onClick: () => doAdd(2, 6) }] : []),
+        ...(w !== 3 || l !== 6 ? [{ label: "3'×6'", onClick: () => doAdd(3, 6) }] : []),
+      ].slice(0, 4) as ChatAction[],
+    };
+  }
+
+  // ---- PLANT SOMETHING IN A BED ----
+  if (/plant\s+(\w+)/i.test(lower) && !/what.*plant/i.test(lower)) {
+    const mentioned = findPlantsMentioned(lower);
+    if (mentioned.length > 0 && spec.beds.length > 0) {
+      const plant = mentioned[0];
+      // Find first bed with empty space
+      const targetBed = spec.beds.find(b => b.squares.flat().some(s => !s.plantId));
+      if (targetBed) {
+        return {
+          text: `Plant **${plant.icon} ${plant.common_name}** — where?`,
+          actions: spec.beds.filter(b => b.squares.flat().some(s => !s.plantId)).slice(0, 4).map(bed => ({
+            label: bed.name,
+            icon: plant.icon,
+            onClick: () => {
+              // Fill next empty square
+              for (let r = 0; r < bed.squares.length; r++) {
+                for (let c = 0; c < bed.squares[r].length; c++) {
+                  if (!bed.squares[r][c].plantId) {
+                    actions.setPlant(bed.id, r, c, plant.id);
+                    return;
+                  }
+                }
+              }
+            },
+          })),
+        };
+      }
+    }
+  }
+
+  // ---- FILL / AUTO-PLANT A BED ----
+  if (/fill|auto.?plant|populate/i.test(lower)) {
+    const bedRef = findBedByName(spec, lower.replace(/fill|auto.?plant|populate|with|plants/gi, '').trim()) || spec.beds[0];
+    if (!bedRef) return { text: 'Create a bed first, then I can fill it with plants.' };
+
+    const suggestions = getSmartSuggestion(spec, bedRef);
+    return {
+      text: `I'll fill **${bedRef.name}** with the best plants for the current season and companion compatibility:`,
       actions: [
         {
-          label: `Create ${w}'×${l}' ${type.replace('_', ' ')}`,
+          label: `Auto-fill ${bedRef.name}`,
+          icon: '🌱',
+          variant: 'primary',
           onClick: () => {
-            const nextX = (spec.beds.length % 4) * 5 + 2;
-            const nextY = Math.floor(spec.beds.length / 4) * 4 + 2;
-            actions.addBed({ name, type, widthFt: w, lengthFt: l, sunExposure: 'full_sun', x: nextX, y: nextY });
-          }
+            let idx = 0;
+            bedRef.squares.forEach((row, ri) => row.forEach((sq, ci) => {
+              if (!sq.plantId && idx < suggestions.length) {
+                actions.setPlant(bedRef.id, ri, ci, suggestions[idx % suggestions.length].id);
+                idx++;
+              }
+            }));
+          },
         },
-        ...(sizeMatch ? [] : [
-          { label: 'Make it 4×4 instead', onClick: () => actions.addBed({ name, type, widthFt: 4, lengthFt: 4, sunExposure: 'full_sun', x: 2, y: 2 }) },
-          { label: 'Make it 2×6 instead', onClick: () => actions.addBed({ name, type, widthFt: 2, lengthFt: 6, sunExposure: 'full_sun', x: 2, y: 2 }) },
-        ]),
-      ]
+        ...suggestions.slice(0, 3).map(p => ({
+          label: `${p.icon} ${p.common_name}`,
+          onClick: () => {
+            for (let r = 0; r < bedRef.squares.length; r++) {
+              for (let c = 0; c < bedRef.squares[r].length; c++) {
+                if (!bedRef.squares[r][c].plantId) {
+                  actions.setPlant(bedRef.id, r, c, p.id);
+                  return;
+                }
+              }
+            }
+          },
+        })),
+      ],
     };
   }
 
-  // What to plant now
-  if (/what.*(plant|grow|start|sow).*now/i.test(lower) || /plant.*now/i.test(lower) || /what.*should.*plant/i.test(lower)) {
-    const now = new Date();
-    const month = now.getMonth(); // 0-indexed
+  // ---- WHAT SHOULD I PLANT / SEASONAL ADVICE ----
+  if (/what.*(plant|grow|start|sow)|should.*plant|recommend/i.test(lower)) {
+    const suggestions = getSmartSuggestion(spec, null);
 
-    let recommendation = '';
-    const suggested: string[] = [];
+    const urgent = plants.filter(p => isInWindow(p.zone_4_seed_start_date, now, 10));
+    const lines = [`**${season.phase}** — ${season.description}\n`];
 
-    if (month <= 2) { // Jan-Mar
-      recommendation = 'It\'s indoor seed starting season! Start these seeds indoors now:';
-      suggested.push('onion', 'leek', 'celery', 'broccoli', 'cabbage', 'pepper', 'eggplant');
-    } else if (month <= 3) { // April
-      recommendation = 'Start tomatoes and peppers indoors, and sow cool-season crops outside:';
-      suggested.push('tomato', 'cherry_tomato', 'pepper', 'pea', 'spinach', 'lettuce', 'radish');
-    } else if (month <= 4) { // May
-      recommendation = 'After last frost (May 10), transplant warm crops and direct sow:';
-      suggested.push('tomato', 'pepper', 'cucumber', 'zucchini', 'bush_bean', 'corn', 'basil');
-    } else if (month <= 6) { // Jun-Jul
-      recommendation = 'Plant fall crops and succession sow for continuous harvest:';
-      suggested.push('kale', 'beet', 'carrot', 'lettuce', 'broccoli', 'turnip');
-    } else {
-      recommendation = 'Focus on harvesting and garden cleanup. Plant garlic in October for next year!';
-      suggested.push('garlic', 'kale', 'spinach');
+    if (urgent.length > 0) {
+      lines.push('**Start now (in the window):**');
+      urgent.forEach(p => lines.push(`${p.icon} ${p.common_name} — ${p.zone_4_seed_start_date}`));
+      lines.push('');
     }
 
-    const matchedPlants = suggested.map(id => plants.find(p => p.id === id)).filter(Boolean);
+    if (suggestions.length > 0) {
+      lines.push('**Top picks for your garden:**');
+      suggestions.slice(0, 5).forEach(p => {
+        const date = p.zone_4_seed_start_date || p.zone_4_direct_sow_date || p.zone_4_transplant_date || '';
+        lines.push(`${p.icon} ${p.common_name} — ${date}`);
+      });
+    }
+
+    if (daysToFrost > 0) {
+      lines.push(`\n*${daysToFrost} days until last frost (May 10)*`);
+    }
+
+    const firstBedWithSpace = spec.beds.find(b => b.squares.flat().some(s => !s.plantId));
 
     return {
-      text: `${recommendation}\n\n${matchedPlants.map(p => `${p!.icon} **${p!.common_name}** — ${p!.zone_4_seed_start_date ? `Start indoors: ${p!.zone_4_seed_start_date}` : `Direct sow: ${p!.zone_4_direct_sow_date}`}`).join('\n')}`,
-      actions: spec.beds.length > 0 ? [
-        { label: 'Auto-fill my first bed', onClick: () => {
-          const bed = spec.beds[0];
-          if (!bed) return;
-          let sq = 0;
-          for (const plantId of suggested) {
-            if (sq >= bed.widthFt * bed.lengthFt) break;
-            const row = Math.floor(sq / bed.widthFt);
-            const col = sq % bed.widthFt;
-            if (!bed.squares[row]?.[col]?.plantId) {
-              actions.setPlant(bed.id, row, col, plantId);
-              sq++;
-            } else {
-              sq++;
-            }
-          }
-        }},
+      text: lines.join('\n'),
+      actions: firstBedWithSpace ? [
+        {
+          label: `Fill ${firstBedWithSpace.name}`,
+          icon: '🌱',
+          variant: 'primary',
+          onClick: () => {
+            let idx = 0;
+            firstBedWithSpace.squares.forEach((row, ri) => row.forEach((sq, ci) => {
+              if (!sq.plantId && idx < suggestions.length) {
+                actions.setPlant(firstBedWithSpace.id, ri, ci, suggestions[idx].id);
+                idx++;
+              }
+            }));
+          },
+        },
       ] : [
-        { label: 'Create a bed first', onClick: () => actions.addBed({ name: 'Veggie Bed', type: 'raised', widthFt: 4, lengthFt: 8, sunExposure: 'full_sun', x: 2, y: 2 }) },
-      ]
+        { label: 'Add a bed to get started', icon: '+', onClick: () => {
+          const pos = getNextBedPosition(spec);
+          actions.addBed({ name: 'Veggie Bed', type: 'raised', widthFt: 4, lengthFt: 8, sunExposure: 'full_sun', x: pos.x, y: pos.y });
+        }},
+      ],
     };
   }
 
-  // Companion planting
-  if (/companion|what.*goes.*with|plant.*next.*to|pair.*with/i.test(lower)) {
-    const plantNameMatch = plants.find(p =>
-      lower.includes(p.common_name.toLowerCase()) || lower.includes(p.id)
-    );
+  // ---- COMPANION PLANTING ----
+  if (/companion|goes.*with|next.*to|pair|compatible/i.test(lower)) {
+    const plant = findPlantsMentioned(lower)[0] || findPlantByName(lower.replace(/what|companion|goes|with|next|to|pair|compatible|for|plant/gi, '').trim());
 
-    if (plantNameMatch) {
-      const goods = plantNameMatch.companions_good.map(id => plants.find(p => p.id === id)).filter(Boolean);
-      const bads = plantNameMatch.companions_bad.map(id => plants.find(p => p.id === id)).filter(Boolean);
+    if (plant) {
+      const goods = plant.companions_good.map(id => getPlantById(id) || plants.find(p => p.common_name.toLowerCase().includes(id))).filter(Boolean);
+      const bads = plant.companions_bad.map(id => getPlantById(id) || plants.find(p => p.common_name.toLowerCase().includes(id))).filter(Boolean);
 
       return {
-        text: `**${plantNameMatch.icon} ${plantNameMatch.common_name}** companion guide:\n\n` +
-          (goods.length > 0 ? `✅ **Good companions:** ${goods.map(p => `${p!.icon} ${p!.common_name}`).join(', ')}\n\n` : '') +
-          (bads.length > 0 ? `❌ **Avoid:** ${bads.map(p => `${p!.icon} ${p!.common_name}`).join(', ')}` : ''),
+        text: `**${plant.icon} ${plant.common_name}** companions:\n\n` +
+          (goods.length > 0 ? `✅ ${goods.map(p => `${p!.icon} ${p!.common_name}`).join('  ')}\n\n` : '') +
+          (bads.length > 0 ? `❌ ${bads.map(p => `${p!.icon} ${p!.common_name}`).join('  ')}` : '✅ No known bad companions'),
       };
     }
 
+    // List all plants as quick buttons
     return {
-      text: 'Which plant would you like companion recommendations for? Try asking "What goes with tomatoes?" or "What should I plant next to peppers?"',
+      text: 'Which plant? Tap one:',
+      actions: ['tomato', 'pepper', 'cucumber', 'basil', 'carrot', 'lettuce'].map(id => {
+        const p = getPlantById(id);
+        return p ? { label: `${p.icon} ${p.common_name}`, onClick: () => {} } : null;
+      }).filter(Boolean) as ChatAction[],
     };
   }
 
-  // Layout help
-  if (/layout|arrange|plan|design|organize/i.test(lower)) {
+  // ---- BED ANALYSIS ----
+  if (/analyze|check|review|how.*look|bed.*status/i.test(lower)) {
+    if (spec.beds.length === 0) return { text: 'No beds to analyze. Add one first!' };
+
+    const lines: string[] = [];
+    spec.beds.forEach(bed => {
+      const a = analyzeBed(bed);
+      const pctFull = Math.round(a.filled / a.total * 100);
+      const plantList = Object.entries(a.plantCounts).map(([id, n]) => {
+        const p = getPlantById(id);
+        return p ? `${p.icon}×${n}` : '';
+      }).filter(Boolean).join(' ');
+
+      lines.push(`**${bed.name}** (${bed.widthFt}'×${bed.lengthFt}') — ${pctFull}% full, ${a.empty} empty`);
+      if (plantList) lines.push(`  ${plantList}`);
+      if (a.compat.bad > 0) lines.push(`  ⚠️ ${a.compat.bad} bad companion pairing${a.compat.bad > 1 ? 's' : ''}`);
+      if (a.compat.good > 0) lines.push(`  ✅ ${a.compat.good} good pairing${a.compat.good > 1 ? 's' : ''}`);
+      lines.push('');
+    });
+
+    return { text: lines.join('\n') };
+  }
+
+  // ---- THIS WEEK / TASKS ----
+  if (/this week|what.*do|task|todo|schedule/i.test(lower)) {
+    const tasks = getCurrentWeekTasks(now);
+    if (tasks.length === 0) return { text: 'No specific tasks for this week. Enjoy your garden!' };
     return {
-      text: `Here are some layout tips for your ${spec.property?.lot_width_ft ?? 0}'×${spec.property?.lot_depth_ft ?? 0}' space:\n\n` +
-        '• **Tall plants on the north side** so they don\'t shade shorter ones\n' +
-        '• **Leave 2\' paths** between beds for access\n' +
-        '• **Orient beds north-south** for even sun distribution\n' +
-        '• **Group by water needs** — drought-tolerant herbs away from water-loving tomatoes\n' +
-        '• **Place trellises on the north or west edge** of your garden',
-      actions: [
-        { label: 'Create a starter layout', onClick: () => {
-          actions.addBed({ name: 'Veggie Bed 1', type: 'raised', widthFt: 4, lengthFt: 8, sunExposure: 'full_sun', x: 2, y: 2 });
-          actions.addBed({ name: 'Veggie Bed 2', type: 'raised', widthFt: 4, lengthFt: 8, sunExposure: 'full_sun', x: 8, y: 2 });
-          actions.addBed({ name: 'Herb Trough', type: 'trough', widthFt: 6, lengthFt: 2, sunExposure: 'full_sun', x: 2, y: 12 });
-          actions.addBed({ name: 'Trellis', type: 'trellis', widthFt: 2, lengthFt: 6, sunExposure: 'full_sun', x: 14, y: 2 });
-        }},
-      ]
+      text: `**This week's tasks** (${season.phase}):\n\n${tasks.map(t => `• ${t}`).join('\n')}`,
     };
   }
 
-  // Space/area questions
-  if (/how (much|many)|space|size|area|dimension/i.test(lower)) {
-    const totalSqFt = spec.beds.reduce((sum, b) => sum + b.widthFt * b.lengthFt, 0);
-    const gardenArea = (spec.property?.lot_width_ft ?? 0) * (spec.property?.lot_depth_ft ?? 0);
+  // ---- SPECIFIC PLANT INFO ----
+  const mentionedPlant = findPlantsMentioned(lower)[0] || findPlantByName(lower);
+  if (mentionedPlant && lower.length < 30) {
+    const p = mentionedPlant;
+    const lines = [
+      `**${p.icon} ${p.common_name}** *(${p.botanical_name})*\n`,
+      `**Spacing:** ${p.spacing_per_sqft}/sqft  |  **Days:** ${p.days_to_maturity}  |  **Yield:** ${p.yield_per_plant_lbs}lbs`,
+      `**Sun:** ${p.sun_requirement.replace(/_/g, ' ')}  |  **Water:** ${p.water_need}  |  **Frost:** ${p.frost_tolerance}`,
+    ];
+    if (p.zone_4_seed_start_date) lines.push(`**Start indoors:** ${p.zone_4_seed_start_date}`);
+    if (p.zone_4_transplant_date) lines.push(`**Transplant:** ${p.zone_4_transplant_date}`);
+    if (p.zone_4_direct_sow_date) lines.push(`**Direct sow:** ${p.zone_4_direct_sow_date}`);
+    if (p.varieties.length > 0) lines.push(`\n**MN varieties:** ${p.varieties.slice(0, 3).join(', ')}`);
+
+    const firstBed = spec.beds.find(b => b.squares.flat().some(s => !s.plantId));
     return {
-      text: `Your garden space is **${spec.property?.lot_width_ft}'×${spec.property?.lot_depth_ft}'** (${gardenArea} sqft).\n\n` +
-        `You have **${spec.beds.length} beds** using **${totalSqFt} sqft** — that's ${gardenArea > 0 ? Math.round(totalSqFt / gardenArea * 100) : 0}% of your space.\n\n` +
-        `For a family of 2-4, 200-400 sqft of growing area is recommended. You can edit your garden dimensions in the right panel when no bed is selected.`,
+      text: lines.join('\n'),
+      actions: firstBed ? [{
+        label: `Plant in ${firstBed.name}`,
+        icon: p.icon,
+        variant: 'primary',
+        onClick: () => {
+          for (let r = 0; r < firstBed.squares.length; r++) {
+            for (let c = 0; c < firstBed.squares[r].length; c++) {
+              if (!firstBed.squares[r][c].plantId) {
+                actions.setPlant(firstBed.id, r, c, p.id);
+                return;
+              }
+            }
+          }
+        },
+      }] : undefined,
     };
   }
 
-  // Garden info
-  if (/status|overview|summary/i.test(lower)) {
+  // ---- OVERVIEW / STATUS ----
+  if (/status|overview|summary|garden/i.test(lower) || /^(hi|hello|hey)$/i.test(lower)) {
     const totalPlants = spec.beds.reduce((sum, b) => sum + b.squares.flat().filter(s => s.plantId).length, 0);
+    const totalSqFt = spec.beds.reduce((sum, b) => sum + b.widthFt * b.lengthFt, 0);
+
     return {
-      text: `**Your Garden at a Glance:**\n\n` +
-        `• ${spec.beds.length} beds\n` +
-        `• ${totalPlants} plants placed\n` +
-        `• Zone 4b — last frost May 10\n` +
-        `• ${spec.tasks.filter(t => t.status === 'pending').length} pending tasks\n` +
-        `• ${spec.harvestLog.reduce((sum, h) => sum + h.quantityLbs, 0).toFixed(1)} lbs harvested`,
+      text: `**${season.phase}** — ${season.description}\n\n` +
+        `You have **${spec.beds.length} beds** (${totalSqFt} sqft) with **${totalPlants} plants** placed.\n` +
+        (daysToFrost > 0 ? `${daysToFrost} days until last frost.\n\n` : '\n') +
+        'What would you like to do?',
+      actions: [
+        { label: 'What to plant', icon: '🌱', onClick: () => {} },
+        { label: 'Add a bed', icon: '+', onClick: () => {} },
+        { label: 'Analyze beds', icon: '🔍', onClick: () => {} },
+        { label: "This week's tasks", icon: '📋', onClick: () => {} },
+      ],
     };
   }
 
-  // Fallback
+  // ---- HELP / FALLBACK ----
   return {
-    text: 'I can help you with:\n\n' +
-      '• **"Add a 4x8 raised bed"** — create beds by size and type\n' +
-      '• **"What should I plant now?"** — seasonal recommendations\n' +
-      '• **"What goes with tomatoes?"** — companion planting\n' +
-      '• **"Help me plan my layout"** — arrangement tips\n' +
-      '• **"How much space do I have?"** — area calculations\n' +
-      '• **"Garden status"** — overview of your plan\n\n' +
-      'Try asking me anything about your garden!',
+    text: 'I can help you:',
+    actions: [
+      { label: 'Add a bed', onClick: () => {} },
+      { label: 'What to plant now', onClick: () => {} },
+      { label: 'Companion check', onClick: () => {} },
+      { label: 'Analyze my beds', onClick: () => {} },
+      { label: "This week's tasks", onClick: () => {} },
+      { label: 'Fill a bed', onClick: () => {} },
+    ],
   };
 }
 
+// ---- COMPONENT ----
+
 export const DesignChat: React.FC<DesignChatProps> = ({
-  spec, onAddBed, onSetPlant, onRemoveBed: _onRemoveBed, isOpen, onToggle
+  spec, onAddBed, onSetPlant, onRemoveBed, isOpen, onToggle
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      text: 'Welcome to your garden studio! I can help you design your space — try asking me to add beds, suggest plants, or plan your layout.',
-      actions: [
-        { label: 'What should I plant now?', onClick: () => handleSend('What should I plant now?') },
-        { label: 'Help me plan my layout', onClick: () => handleSend('Help me plan my layout') },
-        { label: 'Add a 4×8 raised bed', onClick: () => handleSend('Add a 4x8 raised bed') },
-      ]
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Show welcome on first open
+  const [welcomed, setWelcomed] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-    if (isOpen) inputRef.current?.focus();
+    if (isOpen) {
+      inputRef.current?.focus();
+      if (!welcomed) {
+        const response = respond('hello', spec, { addBed: onAddBed, setPlant: onSetPlant, removeBed: onRemoveBed });
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          text: response.text,
+          actions: response.actions,
+        }]);
+        setWelcomed(true);
+      }
+    }
   }, [isOpen]);
 
-  const handleSend = (text?: string) => {
+  const handleSend = useCallback((text?: string) => {
     const messageText = text || input.trim();
     if (!messageText) return;
 
-    const userMsg: ChatMessage = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      text: messageText,
-    };
-
-    const response = generateResponse(messageText, spec, {
-      addBed: onAddBed,
-      setPlant: onSetPlant,
-    });
-
+    const userMsg: ChatMessage = { id: `u${Date.now()}`, role: 'user', text: messageText };
+    const response = respond(messageText, spec, { addBed: onAddBed, setPlant: onSetPlant, removeBed: onRemoveBed });
     const assistantMsg: ChatMessage = {
-      id: `assist_${Date.now()}`,
+      id: `a${Date.now()}`,
       role: 'assistant',
       text: response.text,
       actions: response.actions,
@@ -264,15 +525,17 @@ export const DesignChat: React.FC<DesignChatProps> = ({
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setInput('');
-  };
+  }, [input, spec, onAddBed, onSetPlant, onRemoveBed]);
 
-  // Simple markdown-ish rendering
   const renderText = (text: string) => {
     return text.split('\n').map((line, i) => {
-      const formatted = line
+      if (line.trim() === '') return <div key={i} className="h-1.5" />;
+      let html = line
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/• /g, '<span style="color:rgba(95,154,100,0.7)">&#8226;</span> ');
-      return <p key={i} className={`${line.trim() === '' ? 'h-2' : ''}`} dangerouslySetInnerHTML={{ __html: formatted }} />;
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/• /g, '<span class="text-sage-400">&#8226;</span> ')
+        .replace(/(✅|❌|⚠️)/g, '<span class="mr-1">$1</span>');
+      return <p key={i} className="leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
     });
   };
 
@@ -280,91 +543,101 @@ export const DesignChat: React.FC<DesignChatProps> = ({
     return (
       <button
         onClick={onToggle}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-white text-xl z-50 transition-transform hover:scale-110"
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-xl z-50 transition-all hover:scale-110 hover:shadow-2xl group"
         style={{
           background: 'linear-gradient(135deg, #437d48, #2b502e)',
           boxShadow: '0 4px 20px rgba(45,80,46,0.3)',
         }}
-        title="Open garden assistant"
       >
-        🌱
+        <span className="group-hover:scale-110 transition-transform">🌱</span>
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-6 right-6 w-[380px] h-[520px] rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
+    <div className="fixed bottom-6 right-6 w-[400px] h-[560px] rounded-2xl flex flex-col z-50 overflow-hidden"
       style={{
-        background: 'rgba(255,255,255,0.95)',
-        backdropFilter: 'blur(16px)',
-        border: '1px solid rgba(200,210,200,0.5)',
-        boxShadow: '0 8px 40px rgba(30,50,30,0.15)',
+        background: 'rgba(255,255,255,0.97)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(180,200,180,0.4)',
+        boxShadow: '0 12px 48px rgba(30,50,30,0.18), 0 2px 8px rgba(30,50,30,0.08)',
       }}
     >
       {/* Header */}
       <div className="px-4 py-3 flex items-center justify-between shrink-0"
-        style={{
-          background: 'linear-gradient(135deg, #1f3b22, #2b502e)',
-        }}
+        style={{ background: 'linear-gradient(135deg, #1a3020, #2b502e)' }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-lg">🌿</span>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(95,154,100,0.2)' }}>
+            🌿
+          </div>
           <div>
-            <p className="text-white text-sm font-medium" style={{ fontFamily: 'var(--font-display)' }}>
+            <p className="text-white text-sm font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
               Garden Assistant
             </p>
-            <p className="text-[10px]" style={{ color: 'rgba(143,186,145,0.7)' }}>
-              Ask me anything about your garden
+            <p className="text-[10px]" style={{ color: 'rgba(143,186,145,0.6)' }}>
+              Design &middot; Plant &middot; Grow
             </p>
           </div>
         </div>
         <button
           onClick={onToggle}
-          className="w-7 h-7 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ fontSize: '13px' }}>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.map(msg => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[90%] rounded-2xl px-4 py-2.5 ${
+            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 ${
               msg.role === 'user'
-                ? 'bg-sage-600 text-white rounded-br-md'
-                : 'bg-parchment-100 text-parchment-800 rounded-bl-md'
-            }`}>
-              <div className="space-y-1 leading-relaxed text-[13px]">
+                ? 'rounded-br-lg text-white'
+                : 'rounded-bl-lg'
+            }`}
+              style={msg.role === 'user'
+                ? { background: 'linear-gradient(135deg, #437d48, #356539)' }
+                : { background: 'rgba(240,245,241,0.9)', border: '1px solid rgba(180,210,180,0.3)' }
+              }
+            >
+              <div className="space-y-0.5 text-[13px]">
                 {renderText(msg.text)}
               </div>
               {msg.actions && msg.actions.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {msg.actions.map((action, i) => (
                     <button
                       key={i}
                       onClick={() => {
                         action.onClick();
-                        if (action.label.startsWith('Create') || action.label.startsWith('Auto') || action.label.startsWith('Make')) {
+                        // If this is a direct action (not a follow-up question), confirm it
+                        const isDirectAction = action.variant === 'primary' ||
+                          /^(create|add|remove|clear|auto|fill|plant in)/i.test(action.label);
+                        if (isDirectAction) {
                           setMessages(prev => [...prev, {
-                            id: `action_${Date.now()}`,
-                            role: 'assistant',
-                            text: `Done! ${action.label}. Check the canvas to see the changes.`,
+                            id: `sys${Date.now()}`,
+                            role: 'system',
+                            text: `✓ ${action.label}`,
                           }]);
                         } else {
                           handleSend(action.label);
                         }
                       }}
-                      className="text-[11px] px-2.5 py-1 rounded-full transition-colors"
-                      style={msg.role === 'user' ? {
-                        background: 'rgba(255,255,255,0.2)',
-                        color: 'white',
-                      } : {
-                        background: 'rgba(95,154,100,0.12)',
-                        color: '#437d48',
-                        border: '1px solid rgba(95,154,100,0.2)',
-                      }}
+                      className={`text-[11px] px-2.5 py-1.5 rounded-lg font-medium transition-all hover:scale-[1.02] ${
+                        action.variant === 'primary'
+                          ? 'text-white shadow-sm'
+                          : ''
+                      }`}
+                      style={action.variant === 'primary'
+                        ? { background: 'linear-gradient(135deg, #437d48, #356539)' }
+                        : msg.role === 'user'
+                          ? { background: 'rgba(255,255,255,0.15)', color: 'white' }
+                          : { background: 'white', border: '1px solid rgba(180,210,180,0.4)', color: '#356539' }
+                      }
                     >
+                      {action.icon && <span className="mr-1">{action.icon}</span>}
                       {action.label}
                     </button>
                   ))}
@@ -373,30 +646,48 @@ export const DesignChat: React.FC<DesignChatProps> = ({
             </div>
           </div>
         ))}
+
+        {/* System messages (confirmations) */}
+        {messages.filter(m => m.role === 'system').length > 0 && null}
+
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Quick Actions Bar */}
+      <div className="px-3 py-1.5 border-t border-parchment-100 flex gap-1 overflow-x-auto shrink-0">
+        {['What to plant', 'Add bed', 'Analyze', 'Tasks', 'Fill bed'].map(q => (
+          <button
+            key={q}
+            onClick={() => handleSend(q)}
+            className="text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-colors"
+            style={{ background: 'rgba(240,245,241,0.8)', color: '#437d48', border: '1px solid rgba(180,210,180,0.3)' }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
       {/* Input */}
-      <div className="px-4 py-3 border-t border-parchment-200 shrink-0">
+      <div className="px-3 py-2.5 border-t border-parchment-200 shrink-0">
         <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask about your garden..."
-            className="flex-1 text-sm rounded-xl border-parchment-200 py-2"
-            style={{ fontFamily: 'var(--font-body)', fontStyle: 'italic' }}
+            placeholder="Add a 4x8 raised bed..."
+            className="flex-1 text-[13px] rounded-xl py-2 px-3"
+            style={{ border: '1px solid rgba(180,210,180,0.4)' }}
           />
           <button
             type="submit"
             disabled={!input.trim()}
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 transition-all disabled:opacity-40"
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 transition-all disabled:opacity-30"
             style={{
-              background: input.trim() ? 'linear-gradient(135deg, #437d48, #2b502e)' : '#c5bbac',
+              background: input.trim() ? 'linear-gradient(135deg, #437d48, #2b502e)' : '#d0d0c8',
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </button>
         </form>
       </div>
