@@ -151,7 +151,7 @@ h1, h2, h3 {
   content: '';
   position: fixed;
   top: 0;
-  left: 220px; /* sidebar width */
+  left: 56px; /* icon rail width */
   right: 0;
   height: 3px;
   background: linear-gradient(90deg,

@@ -1,12 +1,9 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
-import { Dashboard } from './components/Dashboard';
 import { GardenDesigner } from './components/GardenDesigner';
 import { PlantLibrary } from './components/PlantLibrary';
-import { PlantingCalendar } from './components/PlantingCalendar';
-import { TaskManager } from './components/TaskManager';
-import { ShoppingList } from './components/ShoppingList';
+import { PlanView } from './components/PlanView';
 import { useGardenSpec } from './hooks/useGardenSpec';
 import { PropertyConfig } from './types/garden';
 
@@ -39,7 +36,6 @@ function AppContent() {
     importGardenJSON,
   } = useGardenSpec();
 
-  // Listen for property updates from GardenPropertyEditor
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<PropertyConfig>).detail;
@@ -50,47 +46,19 @@ function AppContent() {
   }, [updateSpec]);
 
   const handleNavigate = (view: string) => {
-    const pathMap: Record<string, string> = {
-      dashboard: '/',
-      designer: '/design',
-      library: '/plants',
-      calendar: '/calendar',
-      tasks: '/tasks',
-      shopping: '/shopping',
-    };
-    navigate(pathMap[view] || '/');
+    const paths: Record<string, string> = { designer: '/', library: '/plants', plan: '/plan' };
+    navigate(paths[view] || '/');
   };
 
-  // Map current path to view name for sidebar active state
-  const pathToView: Record<string, string> = {
-    '/': 'dashboard',
-    '/design': 'designer',
-    '/plants': 'library',
-    '/calendar': 'calendar',
-    '/tasks': 'tasks',
-    '/shopping': 'shopping',
-  };
-  const currentView = pathToView[location.pathname] || 'dashboard';
+  const pathToView: Record<string, string> = { '/': 'designer', '/plants': 'library', '/plan': 'plan' };
+  const currentView = pathToView[location.pathname] || 'designer';
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar
-        currentView={currentView}
-        onViewChange={(view) => handleNavigate(view)}
-        spec={spec}
-        onSaveAs={saveGardenAs}
-        onLoadGarden={loadGarden}
-        onDeleteGarden={deleteGarden}
-        onLoadSample={loadSampleGarden}
-        onReset={resetGarden}
-        onExportJSON={exportGardenJSON}
-        onImportJSON={importGardenJSON}
-        savedGardens={listSavedGardens()}
-      />
+      <Sidebar currentView={currentView} onViewChange={handleNavigate} spec={spec} />
       <main className="flex-1 overflow-y-auto bg-parchment-50 min-h-screen paper-grain">
         <Routes>
-          <Route path="/" element={<Dashboard spec={spec} onNavigate={handleNavigate} />} />
-          <Route path="/design" element={
+          <Route path="/" element={
             <GardenDesigner
               spec={spec}
               onAddBed={addBed}
@@ -99,24 +67,26 @@ function AppContent() {
               onResize={resizeBed}
               onRemoveBed={removeBed}
               onUpdateBed={updateBed}
+              onSaveAs={saveGardenAs}
+              onLoadGarden={loadGarden}
+              onDeleteGarden={deleteGarden}
+              onLoadSample={loadSampleGarden}
+              onReset={resetGarden}
+              onExportJSON={exportGardenJSON}
+              onImportJSON={importGardenJSON}
+              savedGardens={listSavedGardens()}
             />
           } />
           <Route path="/plants" element={<PlantLibrary />} />
-          <Route path="/calendar" element={<PlantingCalendar spec={spec} />} />
-          <Route path="/tasks" element={
-            <TaskManager
+          <Route path="/plan" element={
+            <PlanView
               spec={spec}
               onAddTask={addTask}
               onUpdateTask={updateTask}
               onRemoveTask={removeTask}
               onAddHarvest={addHarvestEntry}
-            />
-          } />
-          <Route path="/shopping" element={
-            <ShoppingList
-              spec={spec}
-              onUpdateList={updateShoppingList}
-              onToggleItem={toggleShoppingItem}
+              onUpdateShoppingList={updateShoppingList}
+              onToggleShoppingItem={toggleShoppingItem}
             />
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
