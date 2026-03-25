@@ -3,6 +3,7 @@ import { GardenSpec, GardenBed, BedType, SunRequirement, PropertyConfig } from '
 import { plants, getPlantById } from '../data/plants';
 import { getCurrentWeekTasks, getSeasonPhase, isInWindow, LAST_FROST_DATE } from '../utils/calendar';
 import { getBedCompatibilityScore } from '../utils/companions';
+import { chatWithGemini, executeToolCall, GeminiMessage } from '../utils/gemini';
 import { BedEditor } from './BedEditor';
 import { PlantStatus } from '../types/garden';
 
@@ -69,29 +70,93 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
     if (selectedBed) setMode('guide');
   }, [selectedBed?.id]);
 
-  // ---- CHAT ENGINE (simplified from DesignChat) ----
-  const handleChat = useCallback((text?: string) => {
+  // Gemini conversation history
+  const [geminiHistory, setGeminiHistory] = useState<GeminiMessage[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
+
+  const geminiApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+
+  // ---- CHAT ENGINE — Gemini with local fallback ----
+  const handleChat = useCallback(async (text?: string) => {
     const msg = text || chatInput.trim();
     if (!msg) return;
 
     const userMsg: ChatMessage = { id: `u${Date.now()}`, role: 'user', text: msg };
-
-    // Generate response
-    const response = generateResponse(msg, spec, {
-      addBed: onAddBed, setPlant: onSetPlant, removeBed: onRemoveBed,
-    });
-
-    const assistantMsg: ChatMessage = {
-      id: `a${Date.now()}`,
-      role: 'assistant',
-      text: response.text,
-      actions: response.actions,
-    };
-
-    setChatMessages(prev => [...prev, userMsg, assistantMsg]);
+    setChatMessages(prev => [...prev, userMsg]);
     setChatInput('');
     setMode('chat');
-  }, [chatInput, spec, onAddBed, onSetPlant, onRemoveBed]);
+
+    // Try Gemini first
+    if (geminiApiKey) {
+      setIsThinking(true);
+      try {
+        const newHistory: GeminiMessage[] = [
+          ...geminiHistory,
+          { role: 'user', parts: [{ text: msg }] },
+        ];
+
+        const response = await chatWithGemini(geminiApiKey, newHistory, spec);
+
+        // Execute any tool calls
+        const toolResults: string[] = [];
+        for (const call of response.toolCalls) {
+          const result = executeToolCall(call, spec, {
+            addBed: onAddBed,
+            setPlant: onSetPlant,
+            removeBed: onRemoveBed,
+          });
+          toolResults.push(result);
+        }
+
+        // Build response text
+        let responseText = response.text || '';
+        if (toolResults.length > 0) {
+          if (responseText) responseText += '\n\n';
+          responseText += toolResults.map(r => `✓ ${r}`).join('\n');
+        }
+        if (!responseText) responseText = 'Done!';
+
+        const assistantMsg: ChatMessage = {
+          id: `a${Date.now()}`,
+          role: 'assistant',
+          text: responseText,
+        };
+
+        setChatMessages(prev => [...prev, assistantMsg]);
+        setGeminiHistory([
+          ...newHistory,
+          { role: 'model', parts: [{ text: responseText }] },
+        ]);
+      } catch (err) {
+        console.error('Gemini error, falling back to local:', err);
+        // Fall back to local pattern matching
+        const response = generateResponse(msg, spec, {
+          addBed: onAddBed, setPlant: onSetPlant, removeBed: onRemoveBed,
+        });
+        const assistantMsg: ChatMessage = {
+          id: `a${Date.now()}`,
+          role: 'assistant',
+          text: response.text,
+          actions: response.actions,
+        };
+        setChatMessages(prev => [...prev, assistantMsg]);
+      } finally {
+        setIsThinking(false);
+      }
+    } else {
+      // No API key — use local pattern matching
+      const response = generateResponse(msg, spec, {
+        addBed: onAddBed, setPlant: onSetPlant, removeBed: onRemoveBed,
+      });
+      const assistantMsg: ChatMessage = {
+        id: `a${Date.now()}`,
+        role: 'assistant',
+        text: response.text,
+        actions: response.actions,
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+    }
+  }, [chatInput, spec, onAddBed, onSetPlant, onRemoveBed, geminiApiKey, geminiHistory]);
 
   const renderMarkdown = (text: string) => {
     return text.split('\n').map((line, i) => {
@@ -307,6 +372,17 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
                   </div>
                 </div>
               ))}
+              {isThinking && (
+                <div className="flex justify-start">
+                  <div className="rounded-2xl rounded-bl-lg px-4 py-3" style={{ background: 'rgba(240,245,241,0.9)', border: '1px solid rgba(180,210,180,0.3)' }}>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-sage-400 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-sage-400 animate-pulse" style={{ animationDelay: '0.2s' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-sage-400 animate-pulse" style={{ animationDelay: '0.4s' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={chatEndRef} />
             </div>
           </div>
