@@ -233,6 +233,8 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
           <button onClick={onExportJSON} className="w-full text-left px-3 py-2 rounded-lg hover:bg-parchment-50 text-parchment-600">Export JSON</button>
           <button onClick={() => fileInputRef.current?.click()} className="w-full text-left px-3 py-2 rounded-lg hover:bg-parchment-50 text-parchment-600">Import JSON</button>
           <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onImportJSON?.(f); e.target.value = ''; setShowMenu(false); }} />
+          <div className="border-t my-1" style={{ borderColor: 'rgba(180,210,180,0.2)' }} />
+          <button onClick={() => { setChatMessages([]); setGeminiHistory([]); setMode('guide'); setShowMenu(false); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-parchment-50 text-parchment-600">Clear conversation</button>
         </div>
       )}
 

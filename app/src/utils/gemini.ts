@@ -201,11 +201,93 @@ export interface GeminiResponse {
   toolCalls: ToolCall[];
 }
 
+// ---- GUARDRAILS ----
+
+const RATE_LIMIT_WINDOW_MS = 60_000;  // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 10;    // max 10 requests per minute
+const MAX_INPUT_LENGTH = 500;          // max characters per message
+const MAX_CONVERSATION_TURNS = 30;     // max messages before suggesting reset
+const BLOCKED_PATTERNS = [
+  /ignore.*instructions/i,
+  /ignore.*previous/i,
+  /system.*prompt/i,
+  /pretend.*you.*are/i,
+  /act.*as.*if/i,
+  /reveal.*api/i,
+  /what.*is.*your.*prompt/i,
+];
+
+const requestTimestamps: number[] = [];
+
+function checkRateLimit(): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  // Remove timestamps outside the window
+  while (requestTimestamps.length > 0 && requestTimestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+  if (requestTimestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    const oldestInWindow = requestTimestamps[0];
+    const retryAfterMs = oldestInWindow + RATE_LIMIT_WINDOW_MS - now;
+    return { allowed: false, retryAfterMs };
+  }
+  requestTimestamps.push(now);
+  return { allowed: true, retryAfterMs: 0 };
+}
+
+function sanitizeInput(input: string): { clean: string; blocked: boolean; reason?: string } {
+  // Length check
+  if (input.length > MAX_INPUT_LENGTH) {
+    return { clean: input.slice(0, MAX_INPUT_LENGTH), blocked: false };
+  }
+
+  // Injection pattern check
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(input)) {
+      return { clean: '', blocked: true, reason: 'I can only help with garden design questions.' };
+    }
+  }
+
+  // Strip HTML/script tags
+  const clean = input.replace(/<[^>]*>/g, '').trim();
+  return { clean, blocked: false };
+}
+
+export function checkConversationLength(messages: GeminiMessage[]): boolean {
+  return messages.length < MAX_CONVERSATION_TURNS * 2; // user + model per turn
+}
+
 export async function chatWithGemini(
   apiKey: string,
   messages: GeminiMessage[],
   spec: GardenSpec,
 ): Promise<GeminiResponse> {
+  // Rate limit check
+  const rateCheck = checkRateLimit();
+  if (!rateCheck.allowed) {
+    const waitSec = Math.ceil(rateCheck.retryAfterMs / 1000);
+    return {
+      text: `Slow down — I can handle about 10 questions per minute. Try again in ${waitSec} seconds.`,
+      toolCalls: [],
+    };
+  }
+
+  // Sanitize the latest user input
+  const lastUserMsg = messages[messages.length - 1];
+  if (lastUserMsg?.role === 'user') {
+    const { clean, blocked, reason } = sanitizeInput(lastUserMsg.parts[0]?.text || '');
+    if (blocked) {
+      return { text: reason || 'I can only help with garden design.', toolCalls: [] };
+    }
+    lastUserMsg.parts[0] = { text: clean };
+  }
+
+  // Conversation length check
+  if (!checkConversationLength(messages)) {
+    return {
+      text: 'Our conversation is getting long! Click the ⋮ menu and start a **new conversation** to keep things fast and focused.',
+      toolCalls: [],
+    };
+  }
   const systemPrompt = buildSystemPrompt(spec);
 
   const body = {
