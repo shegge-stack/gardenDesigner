@@ -1,0 +1,326 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+@theme {
+  /* Conservatory Green — deep, lush, alive */
+  --color-sage-50: #f0f5f1;
+  --color-sage-100: #dceade;
+  --color-sage-200: #b8d4bb;
+  --color-sage-300: #8dba91;
+  --color-sage-400: #5f9a64;
+  --color-sage-500: #437d48;
+  --color-sage-600: #356539;
+  --color-sage-700: #2b502e;
+  --color-sage-800: #1f3b22;
+  --color-sage-900: #152717;
+
+  /* Warm Stone — the herringbone floor, fountain stone */
+  --color-parchment-50: #f7f5f2;
+  --color-parchment-100: #eeebe5;
+  --color-parchment-200: #ddd7cd;
+  --color-parchment-300: #c5bbac;
+  --color-parchment-400: #a89882;
+  --color-parchment-500: #8d7c64;
+  --color-parchment-600: #73644f;
+  --color-parchment-700: #5a4e3e;
+  --color-parchment-800: #433a2f;
+  --color-parchment-900: #2d2720;
+
+  /* Terracotta — warm accents, urgency */
+  --color-terra-50: #fdf5f0;
+  --color-terra-100: #f9e6d8;
+  --color-terra-200: #f0c9ad;
+  --color-terra-300: #e5a579;
+  --color-terra-400: #d8814e;
+  --color-terra-500: #c46a35;
+  --color-terra-600: #a5532a;
+  --color-terra-700: #824225;
+  --color-terra-800: #5f3220;
+  --color-terra-900: #40221a;
+
+  /* Glass / Midnight — the steel frame, dark accents */
+  --color-midnight-50: #f2f4f5;
+  --color-midnight-100: #d8dde0;
+  --color-midnight-200: #b0bbc2;
+  --color-midnight-300: #7f909b;
+  --color-midnight-400: #566a77;
+  --color-midnight-500: #3d4f5a;
+  --color-midnight-600: #2d3b44;
+  --color-midnight-700: #222e35;
+  --color-midnight-800: #1a2329;
+  --color-midnight-900: #111a1f;
+
+  /* Harvest Gold — chandelier sparkle, warm light */
+  --color-gold-50: #fffcf0;
+  --color-gold-100: #fef6d4;
+  --color-gold-200: #fcea9e;
+  --color-gold-300: #f7d85c;
+  --color-gold-400: #f0c430;
+  --color-gold-500: #d9a817;
+  --color-gold-600: #b48510;
+  --color-gold-700: #8a640f;
+  --color-gold-800: #644912;
+  --color-gold-900: #3d2d0f;
+
+  /* Legacy aliases */
+  --color-earth-50: var(--color-parchment-50);
+  --color-earth-100: var(--color-parchment-100);
+  --color-earth-200: var(--color-parchment-200);
+  --color-earth-300: var(--color-parchment-300);
+  --color-earth-400: var(--color-parchment-400);
+  --color-earth-500: var(--color-parchment-500);
+  --color-earth-600: var(--color-parchment-600);
+  --color-earth-700: var(--color-parchment-700);
+  --color-earth-800: var(--color-parchment-800);
+  --color-earth-900: var(--color-parchment-900);
+  --color-forest-50: var(--color-sage-50);
+  --color-forest-100: var(--color-sage-100);
+  --color-forest-200: var(--color-sage-200);
+  --color-forest-300: var(--color-sage-300);
+  --color-forest-400: var(--color-sage-400);
+  --color-forest-500: var(--color-sage-500);
+  --color-forest-600: var(--color-sage-600);
+  --color-forest-700: var(--color-sage-700);
+  --color-forest-800: var(--color-sage-800);
+  --color-forest-900: var(--color-sage-900);
+  --color-harvest-50: var(--color-gold-50);
+  --color-harvest-100: var(--color-gold-100);
+  --color-harvest-200: var(--color-gold-200);
+  --color-harvest-300: var(--color-gold-300);
+  --color-harvest-400: var(--color-gold-400);
+  --color-harvest-500: var(--color-gold-500);
+  --color-harvest-600: var(--color-gold-600);
+  --color-harvest-700: var(--color-gold-700);
+  --color-harvest-800: var(--color-gold-800);
+  --color-harvest-900: var(--color-gold-900);
+  --color-soil-50: var(--color-parchment-50);
+  --color-soil-100: var(--color-parchment-100);
+  --color-soil-200: var(--color-parchment-200);
+  --color-soil-300: var(--color-parchment-300);
+  --color-soil-400: var(--color-parchment-400);
+  --color-soil-500: var(--color-parchment-500);
+  --color-soil-600: var(--color-parchment-600);
+  --color-soil-700: var(--color-parchment-700);
+  --color-soil-800: var(--color-parchment-800);
+  --color-soil-900: var(--color-parchment-900);
+}
+
+:root {
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Lora', Georgia, serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-parchment-50);
+  color: var(--color-parchment-900);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* ===== CONSERVATORY GREENHOUSE ATMOSPHERE ===== */
+
+/* Glass roof / conservatory background on main content */
+.paper-grain {
+  background:
+    /* Subtle leaf shadows from above */
+    radial-gradient(ellipse 120px 80px at 15% 8%, rgba(45,80,46,0.04) 0%, transparent 100%),
+    radial-gradient(ellipse 100px 120px at 85% 12%, rgba(45,80,46,0.035) 0%, transparent 100%),
+    radial-gradient(ellipse 150px 90px at 50% 5%, rgba(45,80,46,0.025) 0%, transparent 100%),
+    /* Warm light from glass ceiling */
+    linear-gradient(180deg,
+      rgba(255,252,240,0.8) 0%,
+      rgba(247,245,242,1) 15%,
+      rgba(247,245,242,1) 100%
+    );
+  /* Glass roof grid lines — subtle */
+  background-size: 100%, 100%, 100%, 100%;
+  position: relative;
+}
+
+.paper-grain::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 220px; /* sidebar width */
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(45,80,46,0.08) 10%,
+    rgba(45,80,46,0.12) 50%,
+    rgba(45,80,46,0.08) 90%,
+    transparent 100%
+  );
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* Decorative botanical vine elements at page edges */
+.paper-grain::after {
+  content: '🌿';
+  position: fixed;
+  top: 12px;
+  right: 20px;
+  font-size: 28px;
+  opacity: 0.15;
+  z-index: 0;
+  pointer-events: none;
+  filter: grayscale(0.3);
+}
+
+/* Card hover lift — more dramatic, like objects on a stone surface */
+.card-hover {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  box-shadow: 0 1px 3px rgba(30, 40, 30, 0.06);
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 12px 28px -6px rgba(30, 50, 30, 0.12),
+    0 4px 12px -4px rgba(30, 50, 30, 0.06),
+    0 0 0 1px rgba(45, 80, 46, 0.05);
+}
+
+/* Glass-effect card variant */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 2px 12px rgba(30, 50, 30, 0.06);
+}
+
+/* Scrollbar — thin, vine-like */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-sage-300); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-sage-400); }
+
+/* Page transitions — gentle, organic */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-enter { animation: fadeIn 0.4s ease-out; }
+
+@keyframes leafSway {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(2deg); }
+}
+
+/* Focus styles — green ring like a vine */
+*:focus-visible {
+  outline: 2px solid var(--color-sage-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ===== FORM ELEMENTS — stone/glass aesthetic ===== */
+input, select, textarea {
+  font-family: var(--font-body);
+  border: 1px solid var(--color-parchment-300);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-parchment-800);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--color-sage-400);
+  box-shadow: 0 0 0 3px rgba(95, 154, 100, 0.15);
+  outline: none;
+}
+input::placeholder, textarea::placeholder {
+  color: var(--color-parchment-400);
+  font-style: italic;
+}
+
+/* ===== BUTTONS — organic, alive ===== */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  background: linear-gradient(135deg, var(--color-sage-600), var(--color-sage-700));
+  color: white;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(45, 80, 46, 0.2);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--color-sage-500), var(--color-sage-600));
+  box-shadow: 0 4px 14px rgba(45, 80, 46, 0.25);
+  transform: translateY(-1px);
+}
+.btn-primary:active { transform: scale(0.98) translateY(0); }
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--color-parchment-700);
+  border: 1px solid var(--color-parchment-300);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-secondary:hover {
+  background: white;
+  border-color: var(--color-sage-300);
+  color: var(--color-sage-700);
+}
+
+/* Badge / pill */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* ===== DECORATIVE LEAF BORDERS ===== */
+.leaf-divider {
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--color-sage-200) 20%,
+    var(--color-sage-300) 50%,
+    var(--color-sage-200) 80%,
+    transparent 100%
+  );
+  position: relative;
+}
+.leaf-divider::after {
+  content: '🌿';
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  background: var(--color-parchment-50);
+  padding: 0 8px;
+}

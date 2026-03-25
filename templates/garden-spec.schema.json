@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GardenSpec",
+  "description": "Complete garden specification for generating layouts, planting calendars, shopping lists, and care schedules",
+  "type": "object",
+  "required": ["version", "zone", "lastFrostDate", "firstFrostDate", "beds", "createdAt", "updatedAt"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version",
+      "default": "1.0"
+    },
+    "zone": {
+      "type": "string",
+      "description": "USDA hardiness zone (e.g., '4b')",
+      "enum": ["1a","1b","2a","2b","3a","3b","4a","4b","5a","5b","6a","6b","7a","7b","8a","8b","9a","9b","10a","10b","11a","11b","12a","12b","13a","13b"]
+    },
+    "lastFrostDate": {
+      "type": "string",
+      "format": "date",
+      "description": "Average last spring frost date (e.g., '2026-05-10' for Zone 4b Twin Cities)"
+    },
+    "firstFrostDate": {
+      "type": "string",
+      "format": "date",
+      "description": "Average first fall frost date (e.g., '2026-09-28' for Zone 4b Twin Cities)"
+    },
+    "location": {
+      "type": "object",
+      "properties": {
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 }
+      }
+    },
+    "property": {
+      "type": "object",
+      "description": "Property layout for spatial canvas",
+      "properties": {
+        "lot_width_ft": { "type": "number", "minimum": 10, "description": "Lot width in feet" },
+        "lot_depth_ft": { "type": "number", "minimum": 10, "description": "Lot depth in feet" },
+        "house_x": { "type": "number", "description": "House X position from lot origin (feet)" },
+        "house_y": { "type": "number", "description": "House Y position from lot origin (feet)" },
+        "house_width_ft": { "type": "number", "minimum": 1, "description": "House footprint width" },
+        "house_depth_ft": { "type": "number", "minimum": 1, "description": "House footprint depth" },
+        "orientation_deg": { "type": "number", "minimum": 0, "maximum": 360, "description": "Property orientation: 0 = north at top" }
+      }
+    },
+    "beds": {
+      "type": "array",
+      "description": "Garden beds / growing spaces",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "widthFt", "lengthFt", "sunExposure", "squares"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique bed identifier" },
+          "name": { "type": "string", "description": "Display name (e.g., 'Main Veggie Bed')" },
+          "type": {
+            "enum": ["raised", "in_ground", "container"],
+            "description": "Bed construction type"
+          },
+          "widthFt": { "type": "number", "minimum": 1, "maximum": 20, "description": "Bed width in feet" },
+          "lengthFt": { "type": "number", "minimum": 1, "maximum": 50, "description": "Bed length in feet" },
+          "sunExposure": {
+            "enum": ["full_sun", "partial_sun", "partial_shade", "full_shade"],
+            "description": "Hours of direct sun: full=6+, partial_sun=4-6, partial_shade=2-4, full_shade=<2"
+          },
+          "x": { "type": "number", "description": "Canvas X position (feet from origin)" },
+          "y": { "type": "number", "description": "Canvas Y position (feet from origin)" },
+          "squares": {
+            "type": "array",
+            "description": "2D grid of 1-foot squares (rows of columns)",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["plantId", "status", "plantedDate", "notes"],
+                "properties": {
+                  "plantId": { "type": ["string", "null"], "description": "ID of planted crop, or null if empty" },
+                  "status": {
+                    "enum": ["planned", "seeded", "sprouted", "hardening", "transplanted", "growing", "harvesting", "done"],
+                    "description": "Current growth status"
+                  },
+                  "plantedDate": { "type": ["string", "null"], "format": "date" },
+                  "notes": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "description": "Garden tasks and activities",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "dueDate", "status", "category"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "dueDate": { "type": "string", "format": "date" },
+          "status": { "enum": ["pending", "completed"] },
+          "completedDate": { "type": ["string", "null"], "format": "date" },
+          "plantId": { "type": ["string", "null"] },
+          "bedId": { "type": ["string", "null"] },
+          "category": {
+            "enum": ["seeding", "transplanting", "watering", "harvesting", "maintenance", "other"]
+          },
+          "autoGenerated": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "harvestLog": {
+      "type": "array",
+      "description": "Harvest records with weights",
+      "items": {
+        "type": "object",
+        "required": ["id", "plantId", "bedId", "date", "quantityLbs"],
+        "properties": {
+          "id": { "type": "string" },
+          "plantId": { "type": "string" },
+          "bedId": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "quantityLbs": { "type": "number", "minimum": 0 },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "shoppingList": {
+      "type": "array",
+      "description": "Materials and supplies needed",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "category", "quantity", "unit"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "category": {
+            "enum": ["seeds", "transplants", "soil_amendments", "infrastructure", "tools"]
+          },
+          "quantity": { "type": "number", "minimum": 0 },
+          "unit": { "type": "string" },
+          "estimatedCost": { "type": "number", "minimum": 0 },
+          "purchased": { "type": "boolean", "default": false },
+          "plantId": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "goals": {
+      "type": "object",
+      "description": "Garden goals and constraints",
+      "properties": {
+        "primary_goal": { "enum": ["food_production", "pollinator_garden", "ornamental", "mixed"] },
+        "experience_level": { "enum": ["beginner", "intermediate", "advanced"] },
+        "time_commitment": { "enum": ["minimal", "moderate", "dedicated"] },
+        "budget_total": { "type": "number", "minimum": 0 }
+      }
+    },
+    "season_plan": {
+      "type": "object",
+      "description": "Season planning configuration",
+      "properties": {
+        "indoor_start_date": { "type": "string", "format": "date" },
+        "outdoor_start_date": { "type": "string", "format": "date" },
+        "last_planting_date": { "type": "string", "format": "date" },
+        "season_end_date": { "type": "string", "format": "date" },
+        "use_season_extension": { "type": "boolean", "default": false },
+        "extension_methods": {
+          "type": "array",
+          "items": { "enum": ["row_cover", "cold_frame", "hoop_house", "wall_o_water", "black_plastic_mulch"] }
+        }
+      }
+    },
+    "crop_rotation": {
+      "type": "object",
+      "description": "Crop rotation tracking",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "year": { "type": "integer" },
+        "previous_years": {
+          "type": "object",
+          "description": "Map of year -> bed_id -> crop_rotation_family planted",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Design warnings and recommendations"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Additional project notes"
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
