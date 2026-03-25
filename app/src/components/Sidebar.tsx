@@ -5,7 +5,7 @@ import { exportGardenPdf } from '../utils/exportPdf';
 export type View = 'dashboard' | 'designer' | 'library' | 'calendar' | 'tasks' | 'shopping';
 
 interface SidebarProps {
-  currentView: View;
+  currentView: string;
   onViewChange: (view: View) => void;
   spec?: GardenSpec;
   onSaveAs?: (name: string) => void;

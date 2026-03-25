@@ -47,9 +47,12 @@ export const GardenPropertyEditor: React.FC<GardenPropertyEditorProps> = ({ prop
     <div className="bg-white rounded-xl border border-parchment-200 overflow-hidden">
       <div className="px-4 py-3 border-b border-parchment-100 bg-parchment-50">
         <h3 className="text-xs font-semibold text-parchment-700 uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)', fontSize: '13px', letterSpacing: '0' }}>
-          Garden Space
+          Your Garden Space
         </h3>
-        <p className="text-[10px] text-parchment-400 mt-0.5">Set the overall dimensions of your garden area</p>
+        <p className="text-[10px] text-parchment-400 mt-0.5">
+          The fenced area, backyard plot, or growing space — not your whole lot.
+          Set the dimensions of just the area where you grow.
+        </p>
       </div>
 
       <div className="p-4 space-y-3">

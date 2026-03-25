@@ -5,6 +5,7 @@ import { PlantPalette } from './PlantPalette';
 import { BedEditor } from './BedEditor';
 import { SunSimulator } from './SunSimulator';
 import { GardenPropertyEditor } from './GardenPropertyEditor';
+import { DesignChat } from './DesignChat';
 
 interface GardenDesignerProps {
   spec: GardenSpec;
@@ -32,6 +33,7 @@ export const GardenDesigner: React.FC<GardenDesignerProps> = ({
   const [selectedBedId, setSelectedBedId] = useState<string | null>(null);
   const [showSunSim, setShowSunSim] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
+  const [showChat, setShowChat] = useState(false);
   const [shadowPolygons, setShadowPolygons] = useState<Array<{ points: string; opacity: number }>>([]);
   const [sunHourMap, setSunHourMap] = useState<Map<string, number>>(new Map());
 
@@ -229,6 +231,16 @@ export const GardenDesigner: React.FC<GardenDesignerProps> = ({
           )}
         </div>
       </div>
+
+      {/* Chat Assistant */}
+      <DesignChat
+        spec={spec}
+        onAddBed={onAddBed}
+        onSetPlant={onSetPlant}
+        onRemoveBed={onRemoveBed}
+        isOpen={showChat}
+        onToggle={() => setShowChat(!showChat)}
+      />
     </div>
   );
 };

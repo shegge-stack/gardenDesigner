@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Sidebar, View } from './components/Sidebar';
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { GardenDesigner } from './components/GardenDesigner';
 import { PlantLibrary } from './components/PlantLibrary';
@@ -9,8 +10,10 @@ import { ShoppingList } from './components/ShoppingList';
 import { useGardenSpec } from './hooks/useGardenSpec';
 import { PropertyConfig } from './types/garden';
 
-function App() {
-  const [currentView, setCurrentView] = useState<View>('dashboard');
+function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const {
     spec,
     updateSpec,
@@ -47,14 +50,33 @@ function App() {
   }, [updateSpec]);
 
   const handleNavigate = (view: string) => {
-    setCurrentView(view as View);
+    const pathMap: Record<string, string> = {
+      dashboard: '/',
+      designer: '/design',
+      library: '/plants',
+      calendar: '/calendar',
+      tasks: '/tasks',
+      shopping: '/shopping',
+    };
+    navigate(pathMap[view] || '/');
   };
+
+  // Map current path to view name for sidebar active state
+  const pathToView: Record<string, string> = {
+    '/': 'dashboard',
+    '/design': 'designer',
+    '/plants': 'library',
+    '/calendar': 'calendar',
+    '/tasks': 'tasks',
+    '/shopping': 'shopping',
+  };
+  const currentView = pathToView[location.pathname] || 'dashboard';
 
   return (
     <div className="flex min-h-screen">
       <Sidebar
         currentView={currentView}
-        onViewChange={setCurrentView}
+        onViewChange={(view) => handleNavigate(view)}
         spec={spec}
         onSaveAs={saveGardenAs}
         onLoadGarden={loadGarden}
@@ -66,44 +88,49 @@ function App() {
         savedGardens={listSavedGardens()}
       />
       <main className="flex-1 overflow-y-auto bg-parchment-50 min-h-screen paper-grain">
-        {currentView === 'dashboard' && (
-          <Dashboard spec={spec} onNavigate={handleNavigate} />
-        )}
-        {currentView === 'designer' && (
-          <GardenDesigner
-            spec={spec}
-            onAddBed={addBed}
-            onSetPlant={setSquarePlant}
-            onUpdateStatus={updateSquareStatus}
-            onResize={resizeBed}
-            onRemoveBed={removeBed}
-            onUpdateBed={updateBed}
-          />
-        )}
-        {currentView === 'library' && (
-          <PlantLibrary />
-        )}
-        {currentView === 'calendar' && (
-          <PlantingCalendar spec={spec} />
-        )}
-        {currentView === 'tasks' && (
-          <TaskManager
-            spec={spec}
-            onAddTask={addTask}
-            onUpdateTask={updateTask}
-            onRemoveTask={removeTask}
-            onAddHarvest={addHarvestEntry}
-          />
-        )}
-        {currentView === 'shopping' && (
-          <ShoppingList
-            spec={spec}
-            onUpdateList={updateShoppingList}
-            onToggleItem={toggleShoppingItem}
-          />
-        )}
+        <Routes>
+          <Route path="/" element={<Dashboard spec={spec} onNavigate={handleNavigate} />} />
+          <Route path="/design" element={
+            <GardenDesigner
+              spec={spec}
+              onAddBed={addBed}
+              onSetPlant={setSquarePlant}
+              onUpdateStatus={updateSquareStatus}
+              onResize={resizeBed}
+              onRemoveBed={removeBed}
+              onUpdateBed={updateBed}
+            />
+          } />
+          <Route path="/plants" element={<PlantLibrary />} />
+          <Route path="/calendar" element={<PlantingCalendar spec={spec} />} />
+          <Route path="/tasks" element={
+            <TaskManager
+              spec={spec}
+              onAddTask={addTask}
+              onUpdateTask={updateTask}
+              onRemoveTask={removeTask}
+              onAddHarvest={addHarvestEntry}
+            />
+          } />
+          <Route path="/shopping" element={
+            <ShoppingList
+              spec={spec}
+              onUpdateList={updateShoppingList}
+              onToggleItem={toggleShoppingItem}
+            />
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 }
 
