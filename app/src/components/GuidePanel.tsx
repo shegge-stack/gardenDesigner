@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GardenSpec, GardenBed, BedType, SunRequirement } from '../types/garden';
+import { GardenSpec, GardenBed, BedType, SunRequirement, PropertyConfig } from '../types/garden';
 import { plants, getPlantById } from '../data/plants';
 import { getCurrentWeekTasks, getSeasonPhase, isInWindow, LAST_FROST_DATE } from '../utils/calendar';
 import { getBedCompatibilityScore } from '../utils/companions';
@@ -250,14 +250,8 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
               </div>
             </div>
 
-            {/* Garden Dimensions */}
-            <div className="rounded-xl p-3" style={{ background: 'rgba(240,245,241,0.5)', border: '1px solid rgba(180,210,180,0.15)' }}>
-              <p className="text-[10px] text-parchment-400 uppercase tracking-wider mb-1">Garden Space</p>
-              <p className="text-xs text-parchment-600">
-                {spec.property?.lot_width_ft ?? 0}' × {spec.property?.lot_depth_ft ?? 0}' ({(spec.property?.lot_width_ft ?? 0) * (spec.property?.lot_depth_ft ?? 0)} sqft)
-              </p>
-              <p className="text-[10px] text-parchment-400 mt-1">Edit dimensions in the right panel when no bed is selected in the canvas toolbar.</p>
-            </div>
+            {/* Garden Dimensions — editable inline */}
+            <GardenDimensions property={spec.property} />
 
             {/* Tip */}
             <div className="text-center py-2">
@@ -360,6 +354,28 @@ function generateResponse(
   const lower = input.toLowerCase().trim();
   const now = new Date();
   const daysToFrost = Math.ceil((LAST_FROST_DATE.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Resize garden / property
+  if (/garden.*(size|dimension|resize|width|depth|area)|resize.*garden|change.*garden.*size|how.*big|my.*garden.*is|set.*garden/i.test(lower)) {
+    const sizeMatch = lower.match(/(\d+)\s*[x×']\s*(\d+)/);
+    const currentW = spec.property?.lot_width_ft ?? 30;
+    const currentD = spec.property?.lot_depth_ft ?? 20;
+    if (sizeMatch) {
+      const w = parseInt(sizeMatch[1]);
+      const d = parseInt(sizeMatch[2]);
+      return {
+        text: `Change your garden from **${currentW}'×${currentD}'** to **${w}'×${d}'** (${w * d} sqft)?`,
+        actions: [
+          { label: `Set to ${w}'×${d}'`, icon: '✓', variant: 'primary', onClick: () => {
+            window.dispatchEvent(new CustomEvent('update-property', { detail: { ...spec.property, lot_width_ft: w, lot_depth_ft: d } }));
+          }},
+        ],
+      };
+    }
+    return {
+      text: `Your garden is currently **${currentW}'×${currentD}'** (${currentW * currentD} sqft).\n\nYou can resize it right here — try:\n• "Set garden to 22x17"\n• "Make my garden 30x20"\n\nOr use the dimension inputs in the Guide panel below.`,
+    };
+  }
 
   // Add bed
   if (/add|create|new/i.test(lower) && /bed|planter|raised|trough|barrel|trellis/i.test(lower)) {
@@ -474,8 +490,102 @@ function generateResponse(
     actions: [
       { label: 'Add a bed', onClick: () => {} },
       { label: 'What to plant', onClick: () => {} },
-      { label: 'Analyze beds', onClick: () => {} },
+      { label: 'Resize garden', onClick: () => {} },
       { label: "This week", onClick: () => {} },
     ],
   };
+}
+
+// ---- Inline Garden Dimensions Editor ----
+function GardenDimensions({ property }: { property?: PropertyConfig }) {
+  const [editing, setEditing] = useState(false);
+  const [w, setW] = useState(property?.lot_width_ft ?? 30);
+  const [d, setD] = useState(property?.lot_depth_ft ?? 20);
+
+  useEffect(() => {
+    setW(property?.lot_width_ft ?? 30);
+    setD(property?.lot_depth_ft ?? 20);
+  }, [property?.lot_width_ft, property?.lot_depth_ft]);
+
+  const hasChanges = w !== (property?.lot_width_ft ?? 30) || d !== (property?.lot_depth_ft ?? 20);
+
+  const handleApply = () => {
+    window.dispatchEvent(new CustomEvent('update-property', {
+      detail: { ...property, lot_width_ft: Math.max(5, w), lot_depth_ft: Math.max(5, d) },
+    }));
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="w-full rounded-xl p-3 text-left transition-all hover:scale-[1.01] group"
+        style={{ background: 'rgba(240,245,241,0.5)', border: '1px solid rgba(180,210,180,0.15)' }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] text-parchment-400 uppercase tracking-wider">Garden Space</p>
+            <p className="text-sm font-medium text-parchment-700 mt-0.5">
+              {property?.lot_width_ft ?? 30}' × {property?.lot_depth_ft ?? 20}'
+              <span className="text-parchment-400 font-normal ml-1.5">
+                ({(property?.lot_width_ft ?? 30) * (property?.lot_depth_ft ?? 20)} sqft)
+              </span>
+            </p>
+          </div>
+          <span className="text-[10px] text-parchment-400 opacity-0 group-hover:opacity-100 transition-opacity">Edit</span>
+        </div>
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'rgba(240,245,241,0.7)', border: '1px solid rgba(95,154,100,0.25)' }}>
+      <p className="text-[10px] text-sage-600 uppercase tracking-wider mb-2 font-medium">Garden Dimensions (feet)</p>
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <label className="text-[9px] text-parchment-400 block mb-0.5">Width</label>
+          <input
+            type="number"
+            min={5}
+            max={200}
+            value={w}
+            onChange={e => setW(Math.max(1, Number(e.target.value)))}
+            className="w-full text-sm py-1.5 px-2 rounded-lg"
+            autoFocus
+          />
+        </div>
+        <span className="text-parchment-400 mt-4">×</span>
+        <div className="flex-1">
+          <label className="text-[9px] text-parchment-400 block mb-0.5">Depth</label>
+          <input
+            type="number"
+            min={5}
+            max={200}
+            value={d}
+            onChange={e => setD(Math.max(1, Number(e.target.value)))}
+            className="w-full text-sm py-1.5 px-2 rounded-lg"
+          />
+        </div>
+      </div>
+      <p className="text-[10px] text-parchment-400 mt-1">{w * d} sqft total</p>
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={handleApply}
+          disabled={!hasChanges}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            hasChanges ? 'bg-sage-600 text-white hover:bg-sage-700' : 'bg-parchment-100 text-parchment-400'
+          }`}
+        >
+          {hasChanges ? 'Apply' : 'No changes'}
+        </button>
+        <button
+          onClick={() => { setW(property?.lot_width_ft ?? 30); setD(property?.lot_depth_ft ?? 20); setEditing(false); }}
+          className="px-3 py-1.5 text-xs text-parchment-400 hover:text-parchment-600"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
