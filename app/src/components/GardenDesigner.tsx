@@ -3,6 +3,7 @@ import { GardenSpec, GardenBed, BedType, SunRequirement, PropertyConfig } from '
 import { Canvas } from './Canvas';
 import { SunSimulator } from './SunSimulator';
 import { GuidePanel } from './GuidePanel';
+import { WelcomeScreen } from './WelcomeScreen';
 // GardenPropertyEditor available for future use
 
 interface GardenDesignerProps {
@@ -46,6 +47,7 @@ export const GardenDesigner: React.FC<GardenDesignerProps> = ({
 
   const property = spec.property ?? DEFAULT_PROPERTY;
   const selectedBed = spec.beds.find(b => b.id === selectedBedId) ?? null;
+  const hasContent = spec.beds.length > 0;
 
   const handleAddBedToCanvas = useCallback((bed: { name: string; type: BedType; widthFt: number; lengthFt: number; sunExposure: SunRequirement; x: number; y: number }) => {
     const id = onAddBed(bed);
@@ -76,6 +78,30 @@ export const GardenDesigner: React.FC<GardenDesignerProps> = ({
   const handleStartCreateBed = () => {
     window.dispatchEvent(new Event('canvas-start-create-bed'));
   };
+
+  if (!hasContent) {
+    return (
+      <WelcomeScreen
+        onStart={(w, d) => {
+          window.dispatchEvent(new CustomEvent('update-property', {
+            detail: { ...property, lot_width_ft: w, lot_depth_ft: d },
+          }));
+          const centerX = (w / 2) - 2;
+          const centerY = (d / 2) - 2;
+          onAddBed({
+            name: 'Bed 1',
+            type: 'raised' as BedType,
+            widthFt: 4,
+            lengthFt: 4,
+            sunExposure: 'full_sun' as SunRequirement,
+            x: centerX,
+            y: centerY,
+          });
+        }}
+        onLoadSample={onLoadSample}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen">

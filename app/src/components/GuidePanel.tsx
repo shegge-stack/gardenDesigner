@@ -47,6 +47,19 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [showMenu, setShowMenu] = useState(false);
+  const placeholders = [
+    'What should I grow this season?',
+    'Add a 4x8 raised bed...',
+    'What goes well with tomatoes?',
+    'My garden is 20 feet wide...',
+    'Help me fill my bed with plants',
+    'Is it too late to start peppers?',
+  ];
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setPlaceholderIdx(i => (i + 1) % placeholders.length), 4000);
+    return () => clearInterval(timer);
+  }, []);
   const [saveName, setSaveName] = useState('');
   const [showSaveInput, setShowSaveInput] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -252,77 +265,97 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
           />
         ) : mode === 'guide' ? (
           /* GUIDE MODE */
-          <div className="p-4 space-y-4">
-            {/* Season Status */}
-            <div className="rounded-xl p-4" style={{ background: 'rgba(240,245,241,0.8)', border: '1px solid rgba(180,210,180,0.2)' }}>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-parchment-800" style={{ fontFamily: 'var(--font-display)' }}>
-                  {season.phase}
-                </h3>
-                {daysToFrost > 0 && (
-                  <span className="text-[11px] font-medium" style={{ color: '#437d48' }}>{daysToFrost}d to frost</span>
-                )}
-              </div>
-              <p className="text-xs text-parchment-500">{season.description}</p>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="p-4 space-y-5 stagger-children">
+            {/* Warm seasonal greeting */}
+            <div className="text-center pt-2">
+              <p className="text-3xl mb-2 animate-float" style={{ animationDuration: '5s' }}>
+                {season.phase === 'Indoor Seeding' ? '🌱' : season.phase === 'Growing Season' ? '☀️' : '🌿'}
+              </p>
+              <h3 className="text-lg text-parchment-800 italic" style={{ fontFamily: 'var(--font-display)' }}>
+                {season.phase === 'Indoor Seeding' ? 'Time to start your seeds' :
+                 season.phase === 'Cool Season Planting' ? 'Cool crops are calling' :
+                 season.phase === 'Warm Season Planting' ? 'The garden awaits' :
+                 'Your garden is growing'}
+              </h3>
+              <p className="text-sm text-parchment-500 mt-1 leading-relaxed">
+                {season.description}
+                {daysToFrost > 0 && <><br /><span className="font-medium text-sage-600">{daysToFrost} days until last frost</span></>}
+              </p>
+            </div>
+
+            {/* Garden at a glance — visual, not tabular */}
+            <div className="rounded-2xl p-4" style={{
+              background: 'linear-gradient(135deg, rgba(240,245,241,0.9), rgba(255,252,240,0.6))',
+              border: '1px solid rgba(180,210,180,0.2)',
+            }}>
+              <div className="flex items-center justify-around text-center">
                 <div>
-                  <p className="text-lg font-light text-parchment-800" style={{ fontFamily: 'var(--font-display)' }}>{spec.beds.length}</p>
-                  <p className="text-[9px] text-parchment-400 uppercase tracking-wider">beds</p>
+                  <p className="text-2xl" style={{ fontFamily: 'var(--font-display)' }}>{spec.beds.length}</p>
+                  <p className="text-[10px] text-parchment-400 mt-0.5">beds</p>
                 </div>
+                <div className="w-px h-8" style={{ background: 'rgba(180,210,180,0.3)' }} />
                 <div>
-                  <p className="text-lg font-light text-parchment-800" style={{ fontFamily: 'var(--font-display)' }}>{totalPlants}</p>
-                  <p className="text-[9px] text-parchment-400 uppercase tracking-wider">plants</p>
+                  <p className="text-2xl" style={{ fontFamily: 'var(--font-display)' }}>{totalPlants}</p>
+                  <p className="text-[10px] text-parchment-400 mt-0.5">plants</p>
                 </div>
+                <div className="w-px h-8" style={{ background: 'rgba(180,210,180,0.3)' }} />
                 <div>
-                  <p className="text-lg font-light text-parchment-800" style={{ fontFamily: 'var(--font-display)' }}>{totalSqFt}</p>
-                  <p className="text-[9px] text-parchment-400 uppercase tracking-wider">sqft</p>
+                  <p className="text-2xl" style={{ fontFamily: 'var(--font-display)' }}>{totalSqFt}</p>
+                  <p className="text-[10px] text-parchment-400 mt-0.5">sqft</p>
                 </div>
               </div>
             </div>
 
-            {/* This Week */}
+            {/* This Week — checklist style */}
             {weekTasks.length > 0 && (
               <div>
-                <h3 className="text-xs font-semibold text-parchment-700 uppercase tracking-wider mb-2">This Week</h3>
-                <div className="space-y-1.5">
+                <h3 className="text-sm text-parchment-700 mb-2 italic" style={{ fontFamily: 'var(--font-display)' }}>This Week</h3>
+                <div className="space-y-2">
                   {weekTasks.slice(0, 4).map((task, i) => (
-                    <div key={i} className="flex items-start gap-2 text-[12px] text-parchment-600">
-                      <span className="text-sage-400 mt-0.5 shrink-0">&#8226;</span>
-                      <span>{task}</span>
+                    <div key={i} className="flex items-start gap-3 rounded-xl px-3 py-2.5 text-[13px] text-parchment-600"
+                      style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(180,210,180,0.15)' }}>
+                      <span className="text-sage-400 mt-0.5 text-base">○</span>
+                      <span className="leading-relaxed">{task}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Quick Actions */}
-            <div>
-              <h3 className="text-xs font-semibold text-parchment-700 uppercase tracking-wider mb-2">Quick Actions</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: 'Add bed', icon: '+', action: () => { const pos = getNextPos(spec); onAddBed({ name: `Bed ${spec.beds.length + 1}`, type: 'raised', widthFt: 4, lengthFt: 4, sunExposure: 'full_sun', x: pos.x, y: pos.y }); } },
-                  { label: 'What to plant', icon: '🌱', action: () => handleChat('What should I plant now?') },
-                  { label: 'Fill a bed', icon: '✨', action: () => handleChat('Fill my bed with plants') },
-                  { label: 'Analyze', icon: '🔍', action: () => handleChat('Analyze my beds') },
-                ].map(({ label, icon, action }) => (
-                  <button
-                    key={label}
-                    onClick={action}
-                    className="px-3 py-2.5 rounded-xl text-xs font-medium text-left transition-all hover:scale-[1.02]"
-                    style={{ background: 'white', border: '1px solid rgba(180,210,180,0.3)', color: '#356539' }}
-                  >
-                    <span className="mr-1.5">{icon}</span>{label}
-                  </button>
-                ))}
-              </div>
+            {/* Quick Actions — larger, inviting cards */}
+            <div className="grid grid-cols-2 gap-2.5">
+              {[
+                { label: 'Add a bed', icon: '🪴', desc: 'Raised, barrel, trellis...', action: () => { const pos = getNextPos(spec); onAddBed({ name: `Bed ${spec.beds.length + 1}`, type: 'raised', widthFt: 4, lengthFt: 4, sunExposure: 'full_sun', x: pos.x, y: pos.y }); } },
+                { label: 'What to plant', icon: '🌱', desc: 'Seasonal suggestions', action: () => handleChat('What should I plant now?') },
+                { label: 'Fill a bed', icon: '✨', desc: 'Auto-plant with companions', action: () => handleChat('Fill my bed with the best plants') },
+                { label: 'Check my beds', icon: '🔍', desc: 'Companion analysis', action: () => handleChat('Analyze my beds') },
+              ].map(({ label, icon, desc, action }) => (
+                <button
+                  key={label}
+                  onClick={action}
+                  className="rounded-2xl p-3.5 text-left transition-all duration-200 hover:scale-[1.03] group"
+                  style={{
+                    background: 'rgba(255,255,255,0.8)',
+                    border: '1px solid rgba(180,210,180,0.25)',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                >
+                  <span className="text-xl block mb-1 group-hover:scale-110 transition-transform inline-block">{icon}</span>
+                  <p className="text-xs font-semibold text-parchment-800">{label}</p>
+                  <p className="text-[10px] text-parchment-400 mt-0.5">{desc}</p>
+                </button>
+              ))}
             </div>
 
             {/* Garden Dimensions — editable inline */}
             <GardenDimensions property={spec.property} />
 
-            {/* Tip */}
-            <div className="text-center py-2">
-              <p className="text-[11px] text-parchment-400 italic">Click a bed to edit it, or ask me anything below</p>
+            {/* Gentle guidance */}
+            <div className="text-center pb-2">
+              <p className="text-xs text-parchment-400 italic leading-relaxed">
+                Click a bed to edit it, or ask me anything below.<br />
+                Try: "My garden is 20 feet by 15 feet"
+              </p>
             </div>
           </div>
         ) : (
@@ -399,7 +432,7 @@ export const GuidePanel: React.FC<GuidePanelProps> = ({
             type="text"
             value={chatInput}
             onChange={e => setChatInput(e.target.value)}
-            placeholder="Ask about your garden..."
+            placeholder={placeholders[placeholderIdx]}
             className="flex-1 text-[13px] rounded-xl py-2 px-3"
             style={{ border: '1px solid rgba(180,210,180,0.3)', fontStyle: 'italic' }}
           />
